@@ -11,9 +11,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-//Ports used in this script:
-//26657: For communicating with the Cosmos node to retrieve data.
-//2112: For serving the metrics to Prometheus.
+// Ports used in this script:
+// 26657: For communicating with the Cosmos node to retrieve data.
+// 2112: For serving the metrics to Prometheus.
 
 // Define Prometheus metrics.
 // serverInfo is a GaugeVec that holds static information about the server.
@@ -47,8 +47,8 @@ var lastBlockHeight int64 = 0
 
 // StatusResponse models the JSON returned by the /status endpoint.
 type StatusResponse struct {
-	Jsonrpc string `json:"jsonrpc"`
-	ID      string `json:"id"`
+	Jsonrpc string      `json:"jsonrpc"`
+	ID      interface{} `json:"id"` // Changed to interface{}
 	Result  struct {
 		NodeInfo struct {
 			ID      string `json:"id"`
@@ -64,8 +64,8 @@ type StatusResponse struct {
 
 // BlockResultsResponse models the JSON returned by the /block_results endpoint.
 type BlockResultsResponse struct {
-	Jsonrpc string `json:"jsonrpc"`
-	ID      string `json:"id"`
+	Jsonrpc string      `json:"jsonrpc"`
+	ID      interface{} `json:"id"` // Changed to interface{}
 	Result  struct {
 		Height     string `json:"height"`
 		TxsResults []struct {
