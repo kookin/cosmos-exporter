@@ -16,7 +16,6 @@ import (
 // 2112: For serving the metrics to Prometheus.
 
 // Define Prometheus metrics.
-// serverInfo is a GaugeVec that holds static information about the server.
 var (
 	serverInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -26,20 +25,36 @@ var (
 		[]string{"node_id", "network", "version"},
 	)
 
-	txSuccess = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "tx_success_total",
-		Help: "Count of successful transactions",
+	highestBlock = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "cosmos_highest_block_number",
+		Help: "Highest block number",
 	})
-	txFail = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "tx_fail_total",
-		Help: "Count of failed transactions",
+
+	blockDrift = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "cosmos_block_drift_seconds",
+		Help: "Current block drift time in seconds (current time minus block creation time)",
 	})
+
+	peerCount = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "cosmos_connected_peers",
+		Help: "Number of connected peers",
+	})
+
+	peerVersionCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cosmos_peers_by_version",
+			Help: "Number of peers grouped by their version",
+		},
+		[]string{"version"},
+	)
 )
 
 func init() {
 	prometheus.MustRegister(serverInfo)
-	prometheus.MustRegister(txSuccess)
-	prometheus.MustRegister(txFail)
+	prometheus.MustRegister(highestBlock)
+	prometheus.MustRegister(blockDrift)
+	prometheus.MustRegister(peerCount)
+	prometheus.MustRegister(peerVersionCount)
 }
 
 // lastBlockHeight is used to ensure we process each block only once.
@@ -59,6 +74,9 @@ type StatusResponse struct {
 			LatestBlockHeight string `json:"latest_block_height"`
 			LatestBlockTime   string `json:"latest_block_time"`
 		} `json:"sync_info"`
+		Peers []struct {
+			Version string `json:"version"`
+		} `json:"peers"`
 	} `json:"result"`
 }
 
@@ -97,6 +115,22 @@ func updateStatusMetrics() {
 
 	// Set the metric value to 1 with the corresponding labels.
 	serverInfo.WithLabelValues(nodeID, network, version).Set(1)
+
+	// Update the peer count and peer version counts.
+	peerCount.Set(float64(len(status.Result.Peers)))
+
+	// Reset the peer version count metrics.
+	peerVersionCount.Reset()
+
+	// Count peers grouped by their version.
+	peerVersionMap := make(map[string]int)
+	for _, peer := range status.Result.Peers {
+		peerVersionMap[peer.Version]++
+	}
+
+	for version, count := range peerVersionMap {
+		peerVersionCount.WithLabelValues(version).Set(float64(count))
+	}
 }
 
 // updateTxMetrics queries the /block_results endpoint and updates transaction counters.
@@ -126,14 +160,19 @@ func updateTxMetrics() {
 		return
 	}
 
-	// Increment txSuccess or txFail based on transaction result code.
-	for _, txResult := range blockResults.Result.TxsResults {
-		if txResult.Code == 0 {
-			txSuccess.Inc()
-		} else {
-			txFail.Inc()
-		}
+	// Update highest block number.
+	highestBlock.Set(float64(height))
+
+	// Calculate block drift.
+	blockTime, err := time.Parse(time.RFC3339, blockResults.Result.TxsResults[0].Log)
+	if err != nil {
+		log.Println("Error parsing block creation time:", err)
+		return
 	}
+
+	currentTime := time.Now()
+	drift := currentTime.Sub(blockTime).Seconds()
+	blockDrift.Set(drift)
 
 	lastBlockHeight = height
 }
