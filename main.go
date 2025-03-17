@@ -11,16 +11,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Ports used in this script:
-// 26657: For communicating with the Cosmos node to retrieve data.
-// 2112: For serving the metrics to Prometheus.
-
 // Define Prometheus metrics.
 var (
 	serverInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "server_info",
-			Help: "Static information about this Cosmos node (node ID, network and version).",
+			Help: "Static information about this Cosmos node (node ID, network, and version).",
 		},
 		[]string{"node_id", "network", "version"},
 	)
@@ -63,7 +59,7 @@ var lastBlockHeight int64 = 0
 // StatusResponse models the JSON returned by the /status endpoint.
 type StatusResponse struct {
 	Jsonrpc string      `json:"jsonrpc"`
-	ID      interface{} `json:"id"` // Changed to interface{}
+	ID      interface{} `json:"id"`
 	Result  struct {
 		NodeInfo struct {
 			ID      string `json:"id"`
@@ -83,7 +79,7 @@ type StatusResponse struct {
 // BlockResultsResponse models the JSON returned by the /block_results endpoint.
 type BlockResultsResponse struct {
 	Jsonrpc string      `json:"jsonrpc"`
-	ID      interface{} `json:"id"` // Changed to interface{}
+	ID      interface{} `json:"id"`
 	Result  struct {
 		Height     string `json:"height"`
 		TxsResults []struct {
@@ -163,7 +159,14 @@ func updateTxMetrics() {
 	// Update highest block number.
 	highestBlock.Set(float64(height))
 
-	// Calculate block drift.
+	// Ensure TxsResults is not empty before accessing it.
+	if len(blockResults.Result.TxsResults) == 0 {
+		log.Println("Warning: TxsResults is empty, skipping block drift calculation.")
+		lastBlockHeight = height
+		return
+	}
+
+	// Calculate block drift based on the latest block's creation time.
 	blockTime, err := time.Parse(time.RFC3339, blockResults.Result.TxsResults[0].Log)
 	if err != nil {
 		log.Println("Error parsing block creation time:", err)
