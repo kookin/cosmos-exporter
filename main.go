@@ -129,23 +129,23 @@ func updateStatusMetrics() {
 	}
 }
 
-// updateTxMetrics queries the /block_results endpoint and updates transaction counters.
-func updateTxMetrics() {
-	resp, err := http.Get("http://localhost:26657/block_results")
+// updateBlockMetrics fetches the latest block height and calculates block drift.
+func updateBlockMetrics() {
+	resp, err := http.Get("http://localhost:26657/status")
 	if err != nil {
-		log.Println("Error fetching /block_results:", err)
+		log.Println("Error fetching /status:", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	var blockResults BlockResultsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&blockResults); err != nil {
-		log.Println("Error decoding /block_results response:", err)
+	var status StatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		log.Println("Error decoding /status response:", err)
 		return
 	}
 
 	// Convert the block height to int64.
-	height, err := strconv.ParseInt(blockResults.Result.Height, 10, 64)
+	height, err := strconv.ParseInt(status.Result.SyncInfo.LatestBlockHeight, 10, 64)
 	if err != nil {
 		log.Println("Error parsing block height:", err)
 		return
@@ -159,31 +159,26 @@ func updateTxMetrics() {
 	// Update highest block number.
 	highestBlock.Set(float64(height))
 
-	// Ensure TxsResults is not empty before accessing it.
-	if len(blockResults.Result.TxsResults) == 0 {
-		log.Println("Warning: TxsResults is empty, skipping block drift calculation.")
-		lastBlockHeight = height
-		return
-	}
-
-	// Calculate block drift based on the latest block's creation time.
-	blockTime, err := time.Parse(time.RFC3339, blockResults.Result.TxsResults[0].Log)
+	// Convert block time to Go's time.Time format.
+	blockTime, err := time.Parse(time.RFC3339, status.Result.SyncInfo.LatestBlockTime)
 	if err != nil {
 		log.Println("Error parsing block creation time:", err)
 		return
 	}
 
+	// Calculate block drift.
 	currentTime := time.Now()
 	drift := currentTime.Sub(blockTime).Seconds()
 	blockDrift.Set(drift)
 
+	// Update last processed block height.
 	lastBlockHeight = height
 }
 
 // scrapeMetrics calls our update functions.
 func scrapeMetrics() {
 	updateStatusMetrics()
-	updateTxMetrics()
+	updateBlockMetrics()
 }
 
 func main() {
@@ -202,5 +197,3 @@ func main() {
 	log.Println("Starting exporter on :2112")
 	log.Fatal(http.ListenAndServe(":2112", nil))
 }
-
-
