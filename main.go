@@ -58,9 +58,7 @@ var lastBlockHeight int64 = 0
 
 // StatusResponse models the JSON returned by the /status endpoint.
 type StatusResponse struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	ID      interface{} `json:"id"`
-	Result  struct {
+	Result struct {
 		NodeInfo struct {
 			ID      string `json:"id"`
 			Network string `json:"network"`
@@ -70,26 +68,22 @@ type StatusResponse struct {
 			LatestBlockHeight string `json:"latest_block_height"`
 			LatestBlockTime   string `json:"latest_block_time"`
 		} `json:"sync_info"`
-		Peers []struct {
-			Version string `json:"version"`
+	} `json:"result"`
+}
+
+// NetInfoResponse models the JSON returned by the /net_info endpoint.
+type NetInfoResponse struct {
+	Result struct {
+		NPeers int `json:"n_peers"`
+		Peers  []struct {
+			NodeInfo struct {
+				Version string `json:"version"`
+			} `json:"node_info"`
 		} `json:"peers"`
 	} `json:"result"`
 }
 
-// BlockResultsResponse models the JSON returned by the /block_results endpoint.
-type BlockResultsResponse struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	ID      interface{} `json:"id"`
-	Result  struct {
-		Height     string `json:"height"`
-		TxsResults []struct {
-			Code uint32 `json:"code"`
-			Log  string `json:"log"`
-		} `json:"txs_results"`
-	} `json:"result"`
-}
-
-// updateStatusMetrics queries the /status endpoint and updates the serverInfo metric.
+// updateStatusMetrics queries the /status endpoint and updates server and block metrics.
 func updateStatusMetrics() {
 	resp, err := http.Get("http://localhost:26657/status")
 	if err != nil {
@@ -112,38 +106,12 @@ func updateStatusMetrics() {
 	// Set the metric value to 1 with the corresponding labels.
 	serverInfo.WithLabelValues(nodeID, network, version).Set(1)
 
-	// Update the peer count and peer version counts.
-	peerCount.Set(float64(len(status.Result.Peers)))
-
-	// Reset the peer version count metrics.
-	peerVersionCount.Reset()
-
-	// Count peers grouped by their version.
-	peerVersionMap := make(map[string]int)
-	for _, peer := range status.Result.Peers {
-		peerVersionMap[peer.Version]++
-	}
-
-	for version, count := range peerVersionMap {
-		peerVersionCount.WithLabelValues(version).Set(float64(count))
-	}
+	// Update block metrics
+	updateBlockMetrics(status)
 }
 
-// updateBlockMetrics fetches the latest block height and calculates block drift.
-func updateBlockMetrics() {
-	resp, err := http.Get("http://localhost:26657/status")
-	if err != nil {
-		log.Println("Error fetching /status:", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	var status StatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		log.Println("Error decoding /status response:", err)
-		return
-	}
-
+// updateBlockMetrics updates the highest block number and block drift.
+func updateBlockMetrics(status StatusResponse) {
 	// Convert the block height to int64.
 	height, err := strconv.ParseInt(status.Result.SyncInfo.LatestBlockHeight, 10, 64)
 	if err != nil {
@@ -175,10 +143,42 @@ func updateBlockMetrics() {
 	lastBlockHeight = height
 }
 
-// scrapeMetrics calls our update functions.
+// updatePeerMetrics queries the /net_info endpoint and updates peer count metrics.
+func updatePeerMetrics() {
+	resp, err := http.Get("http://localhost:26657/net_info")
+	if err != nil {
+		log.Println("Error fetching /net_info:", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var netInfo NetInfoResponse
+	if err := json.NewDecoder(resp.Body).Decode(&netInfo); err != nil {
+		log.Println("Error decoding /net_info response:", err)
+		return
+	}
+
+	// Update the peer count.
+	peerCount.Set(float64(netInfo.Result.NPeers))
+
+	// Reset peer version counts.
+	peerVersionCount.Reset()
+
+	// Count peers grouped by their version.
+	peerVersionMap := make(map[string]int)
+	for _, peer := range netInfo.Result.Peers {
+		peerVersionMap[peer.NodeInfo.Version]++
+	}
+
+	for version, count := range peerVersionMap {
+		peerVersionCount.WithLabelValues(version).Set(float64(count))
+	}
+}
+
+// scrapeMetrics collects and updates all metrics periodically.
 func scrapeMetrics() {
 	updateStatusMetrics()
-	updateBlockMetrics()
+	updatePeerMetrics()
 }
 
 func main() {
